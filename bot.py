@@ -2,6 +2,7 @@ import telebot
 from telebot import types
 import json
 import os
+from keep_alive import keep_alive  # ⬅️ إضافة هنا
 
 BOT_TOKEN = "8263363489:AAEOYKHwQRpCoqRlAPSoVlm2A_pFlh2TJAQ"
 CHANNEL_USERNAME = "@tyaf90"
@@ -22,7 +23,7 @@ def save_settings():
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(group_settings, f, ensure_ascii=False, indent=2)
 
-# التحقق من اشتراك المستخدم في قناة معينة
+# التحقق من الاشتراك
 def is_user_subscribed(channel, user_id):
     try:
         chat_member = bot.get_chat_member(channel, user_id)
@@ -31,7 +32,7 @@ def is_user_subscribed(channel, user_id):
         print(f"Error checking subscription: {e}")
         return False
 
-# رسالة الاشتراك في قناة البوت الرسمية
+# رسائل الاشتراك
 def force_main_subscription_message():
     markup = types.InlineKeyboardMarkup()
     btn = types.InlineKeyboardButton("اضغط للاشتراك", url=f"https://t.me/{CHANNEL_USERNAME[1:]}")
@@ -42,7 +43,6 @@ def force_main_subscription_message():
         markup
     )
 
-# رسالة الاشتراك في قناة المجموعة الخاصة
 def force_group_subscription_message(channel):
     markup = types.InlineKeyboardMarkup()
     btn = types.InlineKeyboardButton("اشترك هنا", url=f"https://t.me/{channel[1:]}")
@@ -52,7 +52,7 @@ def force_group_subscription_message(channel):
         markup
     )
 
-# أمر /start
+# الأوامر
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
@@ -62,7 +62,6 @@ def start(message):
     else:
         bot.send_message(user_id, "✅ أهلاً بك، أنت مشترك ويمكنك الآن استخدام البوت.\nأضفني إلى مجموعتك واستخدم الأمر /setchannel")
 
-# أمر /setchannel @channel_name
 @bot.message_handler(commands=['setchannel'])
 def set_channel(message):
     if message.chat.type in ['group', 'supergroup']:
@@ -82,15 +81,13 @@ def set_channel(message):
     else:
         bot.reply_to(message, "❗️ يجب استخدام هذا الأمر من داخل مجموعة أو قناة.")
 
-# التعامل مع الأعضاء الجدد
 @bot.message_handler(content_types=['new_chat_members'])
 def handle_new_members(message):
     group_id = str(message.chat.id)
     if group_id not in group_settings:
-        return  # لم يتم ضبط قناة اشتراك لهذه المجموعة
+        return
 
     required_channel = group_settings[group_id]
-
     for member in message.new_chat_members:
         user_id = member.id
         if not is_user_subscribed(required_channel, user_id):
@@ -108,5 +105,7 @@ def handle_new_members(message):
             except Exception as e:
                 print(f"❗️فشل في تقييد العضو: {e}")
 
+# تشغيل البوت والخادم
 if __name__ == "__main__":
+    keep_alive()  # ⬅️ لتشغيل السيرفر
     bot.polling(non_stop=True)
