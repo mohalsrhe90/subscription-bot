@@ -1,39 +1,55 @@
 import telebot
-import os
+from telebot import types
 
-API_TOKEN = os.getenv("API_TOKEN")
-BOT_MAIN_CHANNEL = os.getenv("BOT_MAIN_CHANNEL")  # قناة البوت الأساسية مثل @tyaf90
+# توكن البوت من BotFather
+BOT_TOKEN = "8263363489:AAEOYKHwQRpCoqRlAPSoVlm2A_pFlh2TJAQ"
+bot = telebot.TeleBot(BOT_TOKEN)
 
-bot = telebot.TeleBot(API_TOKEN)
+# اسم قناة الاشتراك الإجباري
+CHANNEL_USERNAME = "@tyaf90"
 
-# تحقق من الاشتراك في القناة
+# دالة التحقق من الاشتراك في القناة
 def is_user_subscribed(user_id):
     try:
-        member = bot.get_chat_member(BOT_MAIN_CHANNEL, user_id)
-        return member.status in ['member', 'creator', 'administrator']
-    except:
+        chat_member = bot.get_chat_member(CHANNEL_USERNAME, user_id)
+        return chat_member.status in ['member', 'creator', 'administrator']
+    except Exception as e:
+        print(f"Error checking subscription: {e}")
         return False
 
+# رسالة الاشتراك الإجباري
+def force_subscription_message():
+    markup = types.InlineKeyboardMarkup()
+    btn = types.InlineKeyboardButton("يجب عليك الاشتراك في قناة البوت لاستخدامه", url=f"https://t.me/{CHANNEL_USERNAME[1:]}")
+    markup.add(btn)
+    return (
+        "📢 يعمل هذا البوت على زيادة الاشتراكات وتعزيز التفاعل في القنوات والمجموعات من خلال الاشتراك الإجباري.\n\n"
+        "🚸| عذراً عزيزي .\n"
+        f"🔰| عليك الاشتراك في قناة البوت لتتمكن من استخدامه: {CHANNEL_USERNAME}\n"
+        "‼️| اشترك ثم ارسل /start"
+    , markup)
+
+# أمر /start
 @bot.message_handler(commands=['start'])
 def start(message):
-    if not is_user_subscribed(message.from_user.id):
-        markup = telebot.types.InlineKeyboardMarkup()
-        btn = telebot.types.InlineKeyboardButton("🟢 يجب عليك الاشتراك في قناة البوت لاستخدامه", url=f"https://t.me/{BOT_MAIN_CHANNEL.strip('@')}")
-        check = telebot.types.InlineKeyboardButton("✅ تحقق من الاشتراك", callback_data="check")
-        markup.add(btn)
-        markup.add(check)
-        bot.send_message(message.chat.id,
-                         "🚸| عذراً عزيزي.\n🔰| عليك الاشتراك في قناة البوت لتتمكن من استخدامه.\n‼️| اشترك ثم أرسل /start",
-                         reply_markup=markup)
+    user_id = message.from_user.id
+    if not is_user_subscribed(user_id):
+        text, markup = force_subscription_message()
+        bot.send_message(user_id, text, reply_markup=markup)
     else:
-        bot.send_message(message.chat.id, "✅ تم التحقق من الاشتراك، يمكنك الآن استخدام البوت أو إضافته إلى مجموعتك.")
+        bot.send_message(user_id, "✅ أهلاً بك! أنت مشترك في القناة ويمكنك استخدام البوت الآن.")
 
-@bot.callback_query_handler(func=lambda call: call.data == "check")
-def check_subscription(call):
-    if is_user_subscribed(call.from_user.id):
-        bot.answer_callback_query(call.id, "✅ تم التحقق من الاشتراك.")
-        bot.send_message(call.message.chat.id, "✅ يمكنك الآن استخدام البوت.")
-    else:
-        bot.answer_callback_query(call.id, "🚫 لم يتم الاشتراك بعد.")
+# التحقق من رسائل المستخدمين في المجموعات
+@bot.message_handler(func=lambda message: True, content_types=['text'])
+def check_subscription_in_groups(message):
+    if message.chat.type in ['group', 'supergroup']:
+        user_id = message.from_user.id
+        if not is_user_subscribed(user_id):
+            text, markup = force_subscription_message()
+            bot.reply_to(message, text, reply_markup=markup)
+            try:
+                bot.delete_message(message.chat.id, message.message_id)
+            except:
+                pass  # في حال لم يكن للبوت صلاحية حذف الرسائل
 
 bot.polling()
