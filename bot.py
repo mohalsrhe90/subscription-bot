@@ -108,4 +108,5 @@ def handle_new_members(message):
             except Exception as e:
                 print(f"❗️فشل في تقييد العضو: {e}")
 
-bot.polling(none_stop=True)
+if __name__ == "__main__":
+    bot.polling(non_stop=True)
