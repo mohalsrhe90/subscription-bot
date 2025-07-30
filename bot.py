@@ -10,7 +10,7 @@ CHANNEL_USERNAME = "@tyaf90"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
-WEBHOOK_URL = "https://subscription-bot.onrender.com/"
+WEBHOOK_URL = "https://subscription-bot-85rq.onrender.com/"  # ← تأكد من رابط تطبيقك
 
 SETTINGS_FILE = "settings.json"
 
@@ -21,12 +21,10 @@ if os.path.exists(SETTINGS_FILE):
 else:
     group_settings = {}
 
-# حفظ الإعدادات
 def save_settings():
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(group_settings, f, ensure_ascii=False, indent=2)
 
-# التحقق من الاشتراك
 def is_user_subscribed(channel, user_id):
     try:
         chat_member = bot.get_chat_member(channel, user_id)
@@ -35,7 +33,6 @@ def is_user_subscribed(channel, user_id):
         print(f"Error checking subscription: {e}")
         return False
 
-# رسائل الاشتراك
 def force_main_subscription_message():
     markup = types.InlineKeyboardMarkup()
     btn = types.InlineKeyboardButton("اضغط للاشتراك", url=f"https://t.me/{CHANNEL_USERNAME[1:]}")
@@ -59,11 +56,12 @@ def force_group_subscription_message(channel):
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
+    chat_id = message.chat.id
     if not is_user_subscribed(CHANNEL_USERNAME, user_id):
         text, markup = force_main_subscription_message()
-        bot.send_message(user_id, text, reply_markup=markup)
+        bot.send_message(chat_id, text, reply_markup=markup)
     else:
-        bot.send_message(user_id, "✅ أهلاً بك، أنت مشترك ويمكنك الآن استخدام البوت.\nأضفني إلى مجموعتك واستخدم الأمر /setchannel")
+        bot.send_message(chat_id, "✅ أهلاً بك، أنت مشترك ويمكنك الآن استخدام البوت.\nأضفني إلى مجموعتك واستخدم الأمر /setchannel")
 
 @bot.message_handler(commands=['setchannel'])
 def set_channel(message):
@@ -84,7 +82,6 @@ def set_channel(message):
     else:
         bot.reply_to(message, "❗️ يجب استخدام هذا الأمر من داخل مجموعة.")
 
-# التحقق من الرسائل داخل المجموعة
 @bot.message_handler(func=lambda m: m.chat.type in ['group', 'supergroup'])
 def check_subscription_before_message(message):
     group_id = str(message.chat.id)
@@ -111,8 +108,7 @@ def check_subscription_before_message(message):
         except Exception as e:
             print(f"❗️فشل في حذف الرسالة أو إرسال التنبيه: {e}")
 
-# =============== إعداد Webhook ===================
-
+# Webhook endpoint
 @app.route('/', methods=['GET', 'POST'])
 def webhook():
     if request.method == "POST":
@@ -123,6 +119,7 @@ def webhook():
     else:
         return "Bot is running and webhook is set!", 200
 
+# تشغيل السيرفر وضبط Webhook
 if __name__ == "__main__":
     bot.remove_webhook()
     bot.set_webhook(url=WEBHOOK_URL)
