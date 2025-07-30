@@ -1,13 +1,15 @@
 import telebot
 from telebot import types
+from flask import Flask, request
 import json
 import os
-from keep_alive import keep_alive  # لتشغيل السيرفر على Render
 
-BOT_TOKEN = "8263363489:AAEOYKHwQRpCoqRlAPSoVlm2A_pFlh2TJAQ"
-CHANNEL_USERNAME = "@tyaf90"
-
+# إعدادات البوت
+BOT_TOKEN = "YOUR_BOT_TOKEN"
 bot = telebot.TeleBot(BOT_TOKEN)
+WEBHOOK_URL = "https://your-render-url.onrender.com/"  # عدّل هذا حسب رابط مشروعك على Render
+CHANNEL_USERNAME = "@yourchannel"
+
 SETTINGS_FILE = "settings.json"
 
 # تحميل إعدادات القنوات الخاصة بالمجموعات
@@ -17,12 +19,11 @@ if os.path.exists(SETTINGS_FILE):
 else:
     group_settings = {}
 
-# حفظ الإعدادات
 def save_settings():
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(group_settings, f, ensure_ascii=False, indent=2)
 
-# التحقق من الاشتراك في قناة
+# التحقق من الاشتراك
 def is_user_subscribed(channel, user_id):
     try:
         chat_member = bot.get_chat_member(channel, user_id)
@@ -31,17 +32,16 @@ def is_user_subscribed(channel, user_id):
         print(f"Error checking subscription: {e}")
         return False
 
-# رسالة الاشتراك الإجباري
 def force_group_subscription_message(channel, user):
     markup = types.InlineKeyboardMarkup()
     btn = types.InlineKeyboardButton("اشترك الآن", url=f"https://t.me/{channel[1:]}")
     markup.add(btn)
     return (
-        f"📛 عذرًا [{user.first_name}](tg://user?id={user.id})، يجب عليك الاشتراك في القناة التالية أولاً:\n{channel}",
+        f"📛 [{user.first_name}](tg://user?id={user.id})، اشترك أولاً في القناة:\n{channel}",
         markup
     )
 
-# أمر /start (تحقق من الاشتراك في القناة العامة)
+# /start
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
@@ -49,32 +49,26 @@ def start(message):
         markup = types.InlineKeyboardMarkup()
         btn = types.InlineKeyboardButton("اضغط للاشتراك", url=f"https://t.me/{CHANNEL_USERNAME[1:]}")
         markup.add(btn)
-        bot.send_message(user_id, f"🚸 عذرًا، يجب عليك الاشتراك في قناة البوت أولًا: {CHANNEL_USERNAME}\n\n✅ بعد الاشتراك، أرسل /start", reply_markup=markup)
+        bot.send_message(user_id, f"🚸 يجب عليك الاشتراك في القناة: {CHANNEL_USERNAME}", reply_markup=markup)
     else:
-        bot.send_message(user_id, "✅ أهلاً بك، أنت مشترك ويمكنك الآن استخدام البوت.\nأضفني إلى مجموعتك واستخدم الأمر /setchannel")
+        bot.send_message(user_id, "✅ تم التحقق من اشتراكك!")
 
-# أمر /setchannel لتحديد قناة الاشتراك الخاصة بالمجموعة
+# /setchannel
 @bot.message_handler(commands=['setchannel'])
 def set_channel(message):
     if message.chat.type in ['group', 'supergroup']:
         args = message.text.split()
         if len(args) < 2 or not args[1].startswith("@"):
-            bot.reply_to(message, "❗️ يرجى استخدام الأمر بهذا الشكل:\n/setchannel @channel_name")
+            bot.reply_to(message, "❗️ استخدم: /setchannel @channel_name")
             return
-        target_channel = args[1]
         group_id = str(message.chat.id)
-        group_settings[group_id] = target_channel
+        group_settings[group_id] = args[1]
         save_settings()
-        bot.reply_to(message, f"✅ تم ضبط قناة الاشتراك الإجباري: {target_channel}")
+        bot.reply_to(message, f"✅ تم ضبط قناة الاشتراك: {args[1]}")
     else:
-        bot.reply_to(message, "❗️ يجب استخدام هذا الأمر من داخل مجموعة.")
+        bot.reply_to(message, "❗️ استخدم هذا الأمر داخل مجموعة فقط.")
 
-# 🔄 عدم تقييد الأعضاء الجدد عند انضمامهم
-@bot.message_handler(content_types=['new_chat_members'])
-def handle_new_members(message):
-    pass  # لا نفعل شيئًا عند دخول عضو جديد
-
-# ✅ عندما يرسل أي عضو رسالة داخل مجموعة
+# لا تقييد تلقائي — فقط تحقق عند أول رسالة
 @bot.message_handler(func=lambda m: m.chat.type in ['group', 'supergroup'])
 def check_subscription_before_message(message):
     group_id = str(message.chat.id)
@@ -87,21 +81,28 @@ def check_subscription_before_message(message):
 
     if not is_user_subscribed(required_channel, user_id):
         try:
-            # حذف الرسالة
-            bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-
-            # إرسال رسالة داخل المجموعة تطلب الاشتراك
+            bot.delete_message(message.chat.id, message.message_id)
             text, markup = force_group_subscription_message(required_channel, message.from_user)
-            bot.send_message(
-                message.chat.id,
-                text,
-                reply_markup=markup,
-                parse_mode="Markdown"
-            )
+            bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode="Markdown")
         except Exception as e:
-            print(f"❗️فشل في حذف الرسالة أو إرسال التنبيه: {e}")
+            print(f"Error: {e}")
 
-# تشغيل البوت والسيرفر
+# إعداد Flask
+app = Flask(__name__)
+
+@app.route('/', methods=['GET'])
+def index():
+    return 'Bot is running!'
+
+@app.route('/', methods=['POST'])
+def webhook():
+    json_str = request.get_data().decode('utf-8')
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return '', 200
+
+# إعداد Webhook عند التشغيل
 if __name__ == "__main__":
-    keep_alive()
-    bot.polling(non_stop=True)
+    bot.remove_webhook()
+    bot.set_webhook(url=WEBHOOK_URL)
+    app.run(host="0.0.0.0", port=int(os.environ.get('PORT', 5000)))
