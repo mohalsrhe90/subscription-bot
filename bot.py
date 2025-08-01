@@ -1,30 +1,29 @@
 import telebot
 from telebot import types
-from flask import Flask, request
 import json
 import os
+from keep_alive import keep_alive  # تشغيل السيرفر على Render
 
-# بيانات البوت
-BOT_TOKEN = "8263363489:AAEOYKHwQRpCoqRlAPSoVlm2A_pFlh2TJAQ"
-CHANNEL_USERNAME = "@tyaf90"
+# ✅ نستخدم التوكن من متغير بيئة
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+CHANNEL_USERNAME = "@tyaf90"  # قناة الاشتراك الإجباري لاستخدام البوت نفسه
 
 bot = telebot.TeleBot(BOT_TOKEN)
-app = Flask(__name__)
-WEBHOOK_URL = "https://subscription-bot-85rq.onrender.com/"
-
 SETTINGS_FILE = "settings.json"
 
-# تحميل الإعدادات
+# تحميل إعدادات القنوات لكل مجموعة
 if os.path.exists(SETTINGS_FILE):
     with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
         group_settings = json.load(f)
 else:
     group_settings = {}
 
+# حفظ الإعدادات
 def save_settings():
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(group_settings, f, ensure_ascii=False, indent=2)
 
+# التحقق من اشتراك المستخدم في قناة معينة
 def is_user_subscribed(channel, user_id):
     try:
         chat_member = bot.get_chat_member(channel, user_id)
@@ -33,49 +32,38 @@ def is_user_subscribed(channel, user_id):
         print(f"Error checking subscription: {e}")
         return False
 
+# رسالة الاشتراك في قناة البوت
 def force_main_subscription_message():
     markup = types.InlineKeyboardMarkup()
-    btn_sub = types.InlineKeyboardButton("📢 اضغط هنا للاشتراك", url=f"https://t.me/{CHANNEL_USERNAME[1:]}")
-    btn_check = types.InlineKeyboardButton("✅ تحقّقت من الاشتراك", callback_data="check_main_subscription")
-    markup.add(btn_sub)
-    markup.add(btn_check)
+    btn = types.InlineKeyboardButton("اضغط للاشتراك", url=f"https://t.me/{CHANNEL_USERNAME[1:]}")
+    markup.add(btn)
     return (
-        f"🚸 عذرًا، يجب عليك الاشتراك في قناة البوت أولًا:\n{CHANNEL_USERNAME}\n\n"
-        "🧭 اضغط على الزر للاشتراك.\n"
-        "✅ بعد الاشتراك، اضغط على زر (تحقّقت من الاشتراك) بالأسفل.",
+        f"🚸 عذرًا، يجب عليك الاشتراك في قناة البوت أولًا: {CHANNEL_USERNAME}\n\n"
+        "✅ بعد الاشتراك، أرسل /start",
         markup
     )
 
-# عند الضغط على زر "تحققت من الاشتراك" في الخاص
-@bot.callback_query_handler(func=lambda call: call.data == "check_main_subscription")
-def callback_check_subscription(call):
-    user_id = call.from_user.id
-    chat_id = call.message.chat.id
+# رسالة الاشتراك في قناة المجموعة
+def force_group_subscription_message(channel):
+    markup = types.InlineKeyboardMarkup()
+    btn = types.InlineKeyboardButton("اشترك هنا", url=f"https://t.me/{channel[1:]}")
+    markup.add(btn)
+    return (
+        f"🚫 يجب عليك الاشتراك أولًا في: {channel}\nثم أعد المحاولة.",
+        markup
+    )
 
-    if is_user_subscribed(CHANNEL_USERNAME, user_id):
-        bot.edit_message_text(
-            "✅ تم التحقق بنجاح! أنت الآن مشترك ويمكنك استخدام البوت.",
-            chat_id=chat_id,
-            message_id=call.message.message_id
-        )
-    else:
-        bot.answer_callback_query(
-            call.id,
-            "❗️ لم يتم العثور على اشتراكك بعد. تأكد من أنك مشترك بالفعل، ثم حاول مجددًا.",
-            show_alert=True
-        )
-
-# أوامر البوت
+# أمر /start
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
-    chat_id = message.chat.id
     if not is_user_subscribed(CHANNEL_USERNAME, user_id):
         text, markup = force_main_subscription_message()
-        bot.send_message(chat_id, text, reply_markup=markup, parse_mode="Markdown")
+        bot.send_message(user_id, text, reply_markup=markup)
     else:
-        bot.send_message(chat_id, "✅ أهلاً بك، أنت مشترك ويمكنك الآن استخدام البوت.\nأضفني إلى مجموعتك واستخدم الأمر /setchannel")
+        bot.send_message(user_id, "✅ أهلاً بك، أنت مشترك ويمكنك الآن استخدام البوت.\nأضفني إلى مجموعتك واستخدم الأمر /setchannel")
 
+# أمر /setchannel لتحديد قناة الاشتراك الإجباري للمجموعة
 @bot.message_handler(commands=['setchannel'])
 def set_channel(message):
     if message.chat.type in ['group', 'supergroup']:
@@ -95,7 +83,32 @@ def set_channel(message):
     else:
         bot.reply_to(message, "❗️ يجب استخدام هذا الأمر من داخل مجموعة.")
 
-# التحقق من الاشتراك داخل المجموعة
+# عند انضمام عضو جديد
+@bot.message_handler(content_types=['new_chat_members'])
+def handle_new_members(message):
+    group_id = str(message.chat.id)
+    if group_id not in group_settings:
+        return
+
+    required_channel = group_settings[group_id]
+    for member in message.new_chat_members:
+        user_id = member.id
+        if not is_user_subscribed(required_channel, user_id):
+            try:
+                bot.restrict_chat_member(
+                    message.chat.id,
+                    user_id,
+                    can_send_messages=False,
+                    can_send_media_messages=False,
+                    can_send_other_messages=False,
+                    can_add_web_page_previews=False
+                )
+                text, markup = force_group_subscription_message(required_channel)
+                bot.send_message(user_id, text, reply_markup=markup)
+            except Exception as e:
+                print(f"❗️فشل في تقييد العضو: {e}")
+
+# التحقق من اشتراك الأعضاء عند إرسال رسائل
 @bot.message_handler(func=lambda m: m.chat.type in ['group', 'supergroup'])
 def check_subscription_before_message(message):
     group_id = str(message.chat.id)
@@ -111,56 +124,18 @@ def check_subscription_before_message(message):
             bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
 
             markup = types.InlineKeyboardMarkup()
-            btn_sub = types.InlineKeyboardButton("📢 اضغط للاشتراك", url=f"https://t.me/{required_channel[1:]}")
-            btn_check = types.InlineKeyboardButton("✅ تحقّقت من الاشتراك", callback_data=f"check_group_subscription:{required_channel}:{message.chat.id}")
-            markup.add(btn_sub)
-            markup.add(btn_check)
+            btn = types.InlineKeyboardButton("اشترك الآن", url=f"https://t.me/{required_channel[1:]}")
+            markup.add(btn)
 
             bot.send_message(
                 message.chat.id,
-                f"📛 عذرًا {message.from_user.first_name}، يجب عليك الاشتراك في القناة التالية أولاً للنشر في المجموعة:\n{required_channel}\n\n"
-                "🧭 اضغط على (الاشتراك)، ثم اضغط (تحقّقت من الاشتراك).",
+                f"📛 عذرًا {message.from_user.first_name}، يجب عليك الاشتراك في القناة التالية أولاً للنشر في المجموعة:\n{required_channel}",
                 reply_markup=markup
             )
         except Exception as e:
             print(f"❗️فشل في حذف الرسالة أو إرسال التنبيه: {e}")
 
-# عند الضغط على "تحققت من الاشتراك" داخل المجموعة
-@bot.callback_query_handler(func=lambda call: call.data.startswith("check_group_subscription"))
-def callback_check_group_subscription(call):
-    try:
-        _, channel, group_id = call.data.split(":")
-        user_id = call.from_user.id
-
-        if is_user_subscribed(channel, user_id):
-            bot.edit_message_text(
-                f"✅ تم التحقق من اشتراكك في {channel} بنجاح!\nيمكنك الآن النشر في المجموعة.",
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id
-            )
-        else:
-            bot.answer_callback_query(
-                call.id,
-                "❗️أنت لم تشترك بعد.\nيرجى الاشتراك في القناة ثم الضغط مجددًا.",
-                show_alert=True
-            )
-    except Exception as e:
-        print(f"خطأ في التحقق اليدوي من الاشتراك في المجموعة: {e}")
-        bot.answer_callback_query(call.id, "حدث خطأ، حاول مجددًا لاحقًا.", show_alert=True)
-
-# Webhook endpoint
-@app.route('/', methods=['GET', 'POST'])
-def webhook():
-    if request.method == "POST":
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return '', 200
-    else:
-        return "Bot is running and webhook is set!", 200
-
-# تشغيل السيرفر وضبط Webhook
+# ✅ تشغيل البوت والسيرفر
 if __name__ == "__main__":
-    bot.remove_webhook()
-    bot.set_webhook(url=WEBHOOK_URL)
-    app.run(host='0.0.0.0', port=8080)
+    keep_alive()
+    bot.polling(non_stop=True)
