@@ -1,29 +1,30 @@
+import os
+import json
 import telebot
 from telebot import types
-import json
-import os
-from keep_alive import keep_alive  # تشغيل السيرفر على Render
+from flask import Flask, request
 
-# ✅ نستخدم التوكن من متغير بيئة
+# الحصول على توكن البوت من متغير البيئة
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-CHANNEL_USERNAME = "@tyaf90"  # قناة الاشتراك الإجباري لاستخدام البوت نفسه
+CHANNEL_USERNAME = "@tyaf90"  # قناة الاشتراك في البوت
 
 bot = telebot.TeleBot(BOT_TOKEN)
+app = Flask(__name__)
+
 SETTINGS_FILE = "settings.json"
 
-# تحميل إعدادات القنوات لكل مجموعة
+# تحميل إعدادات المجموعات
 if os.path.exists(SETTINGS_FILE):
     with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
         group_settings = json.load(f)
 else:
     group_settings = {}
 
-# حفظ الإعدادات
 def save_settings():
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(group_settings, f, ensure_ascii=False, indent=2)
 
-# التحقق من اشتراك المستخدم في قناة معينة
+# التحقق من اشتراك المستخدم في القناة
 def is_user_subscribed(channel, user_id):
     try:
         chat_member = bot.get_chat_member(channel, user_id)
@@ -32,7 +33,7 @@ def is_user_subscribed(channel, user_id):
         print(f"Error checking subscription: {e}")
         return False
 
-# رسالة الاشتراك في قناة البوت
+# رسالة الاشتراك الإجباري للبوت نفسه
 def force_main_subscription_message():
     markup = types.InlineKeyboardMarkup()
     btn = types.InlineKeyboardButton("اضغط للاشتراك", url=f"https://t.me/{CHANNEL_USERNAME[1:]}")
@@ -43,7 +44,7 @@ def force_main_subscription_message():
         markup
     )
 
-# رسالة الاشتراك في قناة المجموعة
+# رسالة الاشتراك الإجباري للمجموعة
 def force_group_subscription_message(channel):
     markup = types.InlineKeyboardMarkup()
     btn = types.InlineKeyboardButton("اشترك هنا", url=f"https://t.me/{channel[1:]}")
@@ -53,7 +54,7 @@ def force_group_subscription_message(channel):
         markup
     )
 
-# أمر /start
+# بدء البوت
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
@@ -63,7 +64,7 @@ def start(message):
     else:
         bot.send_message(user_id, "✅ أهلاً بك، أنت مشترك ويمكنك الآن استخدام البوت.\nأضفني إلى مجموعتك واستخدم الأمر /setchannel")
 
-# أمر /setchannel لتحديد قناة الاشتراك الإجباري للمجموعة
+# تعيين قناة الاشتراك الإجباري
 @bot.message_handler(commands=['setchannel'])
 def set_channel(message):
     if message.chat.type in ['group', 'supergroup']:
@@ -83,7 +84,7 @@ def set_channel(message):
     else:
         bot.reply_to(message, "❗️ يجب استخدام هذا الأمر من داخل مجموعة.")
 
-# عند انضمام عضو جديد
+# عند دخول أعضاء جدد
 @bot.message_handler(content_types=['new_chat_members'])
 def handle_new_members(message):
     group_id = str(message.chat.id)
@@ -108,7 +109,7 @@ def handle_new_members(message):
             except Exception as e:
                 print(f"❗️فشل في تقييد العضو: {e}")
 
-# التحقق من اشتراك الأعضاء عند إرسال رسائل
+# التحقق من الاشتراك عند إرسال الرسائل
 @bot.message_handler(func=lambda m: m.chat.type in ['group', 'supergroup'])
 def check_subscription_before_message(message):
     group_id = str(message.chat.id)
@@ -122,11 +123,9 @@ def check_subscription_before_message(message):
     if not is_user_subscribed(required_channel, user_id):
         try:
             bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-
             markup = types.InlineKeyboardMarkup()
             btn = types.InlineKeyboardButton("اشترك الآن", url=f"https://t.me/{required_channel[1:]}")
             markup.add(btn)
-
             bot.send_message(
                 message.chat.id,
                 f"📛 عذرًا {message.from_user.first_name}، يجب عليك الاشتراك في القناة التالية أولاً للنشر في المجموعة:\n{required_channel}",
@@ -135,7 +134,23 @@ def check_subscription_before_message(message):
         except Exception as e:
             print(f"❗️فشل في حذف الرسالة أو إرسال التنبيه: {e}")
 
-# ✅ تشغيل البوت والسيرفر
+# ====== Webhook endpoints ======
+
+# صفحة الاختبار (للـ UptimeRobot أو المتصفح)
+@app.route("/", methods=["GET"])
+def index():
+    return "✅ البوت يعمل على Render Web Service."
+
+# المعالجة الرئيسية للوب هوك
+@app.route(f"/{BOT_TOKEN}", methods=["POST"])
+def webhook():
+    update = telebot.types.Update.de_json(request.stream.read().decode("utf-8"))
+    bot.process_new_updates([update])
+    return "OK", 200
+
+# ====== بدء الخادم ======
+
 if __name__ == "__main__":
-    keep_alive()
-    bot.polling(non_stop=True)
+    bot.remove_webhook()
+    bot.set_webhook(url=os.environ.get("RENDER_EXTERNAL_URL") + BOT_TOKEN)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
